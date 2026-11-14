@@ -181,9 +181,43 @@
     }
   }
 
+  // One shared audio object, created the first time we need a sound
+  var audioContext = null;
+
+  function getAudioContext() {
+    if (audioContext === null) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioContext;
+  }
+
+  // A very short, quiet sound that feels like a button click
+  function playClick() {
+    try {
+      var audio = getAudioContext();
+      var oscillator = audio.createOscillator();
+      var volume = audio.createGain();
+
+      oscillator.type = "square";
+      oscillator.frequency.value = 1000;
+
+      // Start at a low volume and fade out fast so it sounds like a "tick"
+      volume.gain.setValueAtTime(0.15, audio.currentTime);
+      volume.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.04);
+
+      oscillator.connect(volume);
+      volume.connect(audio.destination);
+      oscillator.start();
+      oscillator.stop(audio.currentTime + 0.05);
+    } catch (error) {
+      // Sound is optional, so ignore errors
+    }
+  }
+
+  // The longer beep when time is up
   function playBeep() {
     try {
-      var audio = new (window.AudioContext || window.webkitAudioContext)();
+      var audio = getAudioContext();
       var oscillator = audio.createOscillator();
       oscillator.frequency.value = 880;
       oscillator.connect(audio.destination);
@@ -222,6 +256,7 @@
       if (secondsLeft <= 0) {
         resetTimer();
       }
+      playClick();
       timerId = setInterval(tick, 1000);
       startButton.textContent = "Pause";
     }
