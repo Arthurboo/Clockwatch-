@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clockwatch</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --bg: #f5f5f0;
+    --text: #222222;
+    --muted: #777777;
+    --ring-bg: #dddddd;
+    --ring: #2a7de1;
+    --done: #d93025;
+    --button-bg: #222222;
+    --button-text: #ffffff;
+    --input-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #1c1c1e;
+      --text: #f0f0f0;
+      --muted: #999999;
+      --ring-bg: #3a3a3c;
+      --ring: #5aa2ff;
+      --done: #ff6b60;
+      --button-bg: #f0f0f0;
+      --button-text: #1c1c1e;
+      --input-bg: #2c2c2e;
+    }
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .clock { text-align: center; }
+  .dial { position: relative; width: 280px; height: 280px; margin: 0 auto 24px; }
+  .dial svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring-bg { fill: none; stroke: var(--ring-bg); stroke-width: 12; }
+  .ring { fill: none; stroke: var(--ring); stroke-width: 12; stroke-linecap: round; }
+  .time {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 60px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .time.finished { color: var(--done); }
+  .time.editable { cursor: pointer; }
+  .time-input {
+    display: none;
+    width: 200px;
+    font-size: 48px; font-weight: 600;
+    text-align: center;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 2px solid var(--ring);
+    border-radius: 10px;
+    padding: 4px;
+  }
+  button {
+    background: var(--button-bg); color: var(--button-text);
+    border: none; border-radius: 10px;
+    padding: 12px 28px; margin: 0 6px;
+    font-size: 18px; cursor: pointer;
+  }
+  .hint { height: 20px; margin-top: 16px; font-size: 14px; color: var(--muted); }
+  .message { height: 24px; margin-top: 4px; color: var(--done); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="clock">
+    <div class="dial">
+      <svg viewBox="0 0 120 120">
+        <circle class="ring-bg" cx="60" cy="60" r="54"></circle>
+        <circle class="ring" id="ring" cx="60" cy="60" r="54"></circle>
+      </svg>
+      <div class="time editable" id="time" title="Click to edit the time">5:00</div>
+      <div class="time" id="inputHolder" style="display:none;">
+        <input class="time-input" id="timeInput" type="text" maxlength="5" autocomplete="off">
+      </div>
+    </div>
+    <button id="startButton">Start</button>
+    <button id="resetButton">Reset</button>
+    <div class="hint" id="hint">Click the time to edit it</div>
+    <div class="message" id="message"></div>
+  </div>
+
+<script>
+  // Total time in seconds (starts at 5 minutes, but you can change it)
+  var totalSeconds = 300;
+
+  // The circle's length around its edge (2 * pi * radius)
+  var CIRCLE_LENGTH = 2 * Math.PI * 54;
+
+  var secondsLeft = totalSeconds;
+  var timerId = null;     // holds the interval while the clock is running
+  var isEditing = false;  // true while the input box is showing
+
+  var timeElement = document.getElementById("time");
+  var inputHolder = document.getElementById("inputHolder");
+  var timeInput = document.getElementById("timeInput");
+  var ringElement = document.getElementById("ring");
+  var startButton = document.getElementById("startButton");
+  var resetButton = document.getElementById("resetButton");
+  var hintElement = document.getElementById("hint");
+  var messageElement = document.getElementById("message");
+
+  ringElement.style.strokeDasharray = CIRCLE_LENGTH;
+
+  // Turns a number of seconds into text like "5:00"
+  function formatTime(totalSecs) {
+    var minutes = Math.floor(totalSecs / 60);
+    var seconds = totalSecs % 60;
+    var secondsText = String(seconds);
+    if (seconds < 10) {
+      secondsText = "0" + secondsText;
+    }
+    return minutes + ":" + secondsText;
+  }
+
+  // Turns text like "7:30" or "10" into seconds.
+  // "7:30" means 7 minutes 30 seconds. A plain "10" means 10 minutes.
+  // Returns -1 if the text is not valid.
+  function parseTime(text) {
+    text = text.trim();
+    var minutes = 0;
+    var seconds = 0;
+
+    if (text.indexOf(":") !== -1) {
+      var parts = text.split(":");
+      if (parts.length !== 2) {
+        return -1;
+      }
+      minutes = parseInt(parts[0], 10);
+      seconds = parseInt(parts[1], 10);
+      if (parts[0] === "") {
+        minutes = 0;
+      }
+    } else {
+      minutes = parseInt(text, 10);
+    }
+
+    if (isNaN(minutes) || isNaN(seconds)) {
+      return -1;
+    }
+    if (minutes < 0 || seconds < 0 || seconds > 59) {
+      return -1;
+    }
+
+    var result = minutes * 60 + seconds;
+    if (result < 1 || result > 99 * 60 + 59) {
+      return -1;
+    }
+    return result;
+  }
+
+  function showTime() {
+    timeElement.textContent = formatTime(secondsLeft);
+    var fractionLeft = secondsLeft / totalSeconds;
+    ringElement.style.strokeDashoffset = CIRCLE_LENGTH * (1 - fractionLeft);
+  }
+
+  function updateEditableLook() {
+    // The numbers can only be edited when the clock is not running
+    if (timerId === null) {
+      timeElement.classList.add("editable");
+      hintElement.textContent = "Click the time to edit it";
+    } else {
+      timeElement.classList.remove("editable");
+      hintElement.textContent = "";
+    }
+  }
+
+  function playBeep() {
+    try {
+      var audio = new (window.AudioContext || window.webkitAudioContext)();
+      var oscillator = audio.createOscillator();
+      oscillator.frequency.value = 880;
+      oscillator.connect(audio.destination);
+      oscillator.start();
+      oscillator.stop(audio.currentTime + 0.6);
+    } catch (error) {
+      // Sound is optional, so ignore errors
+    }
+  }
+
+  function tick() {
+    secondsLeft = secondsLeft - 1;
+    showTime();
+    if (secondsLeft <= 0) {
+      clearInterval(timerId);
+      timerId = null;
+      startButton.textContent = "Start";
+      timeElement.classList.add("finished");
+      messageElement.textContent = "Time is up!";
+      updateEditableLook();
+      playBeep();
+    }
+  }
+
+  function startOrPause() {
+    if (isEditing) {
+      finishEditing(true);
+    }
+    if (timerId !== null) {
+      // Running, so pause
+      clearInterval(timerId);
+      timerId = null;
+      startButton.textContent = "Resume";
+    } else {
+      // Not running, so start (restart if finished)
+      if (secondsLeft <= 0) {
+        resetTimer();
+      }
+      timerId = setInterval(tick, 1000);
+      startButton.textContent = "Pause";
+    }
+    updateEditableLook();
+  }
+
+  function resetTimer() {
+    if (isEditing) {
+      finishEditing(false);
+    }
+    clearInterval(timerId);
+    timerId = null;
+    secondsLeft = totalSeconds;
+    startButton.textContent = "Start";
+    timeElement.classList.remove("finished");
+    messageElement.textContent = "";
+    showTime();
+    updateEditableLook();
+  }
+
+  // ----- Editing the time -----
+
+  function startEditing() {
+    if (timerId !== null || isEditing) {
+      return; // can't edit while running or already editing
+    }
+    isEditing = true;
+    timeElement.style.display = "none";
+    inputHolder.style.display = "flex";
+    timeInput.style.display = "block";
+    timeInput.value = formatTime(secondsLeft);
+    timeInput.focus();
+    timeInput.select();
+    hintElement.textContent = "Type m:ss (or just minutes), then press Enter";
+  }
+
+  // save is true to keep the new value, false to cancel
+  function finishEditing(save) {
+    if (!isEditing) {
+      return;
+    }
+    isEditing = false;
+
+    if (save) {
+      var newSeconds = parseTime(timeInput.value);
+      if (newSeconds === -1) {
+        messageElement.textContent = "Invalid time. Try 7:30 or 10";
+      } else {
+        totalSeconds = newSeconds;
+        secondsLeft = newSeconds;
+        timeElement.classList.remove("finished");
+        messageElement.textContent = "";
+        startButton.textContent = "Start";
+      }
+    }
+
+    timeInput.style.display = "none";
+    inputHolder.style.display = "none";
+    timeElement.style.display = "flex";
+    showTime();
+    updateEditableLook();
+  }
+
+  timeElement.addEventListener("click", startEditing);
+
+  timeInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      finishEditing(true);
+    } else if (event.key === "Escape") {
+      finishEditing(false);
+    }
+  });
+
+  timeInput.addEventListener("blur", function () {
+    finishEditing(true);
+  });
+
+  startButton.addEventListener("click", startOrPause);
+  resetButton.addEventListener("click", resetTimer);
+
+  showTime();
+  updateEditableLook();
+</script>
+</body>
+</html>
